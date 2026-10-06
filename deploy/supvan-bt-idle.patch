@@ -1,0 +1,291 @@
+diff --git a/crates/supvan-app/src/device.rs b/crates/supvan-app/src/device.rs
+index 56432cb..c9e24b7 100644
+--- a/crates/supvan-app/src/device.rs
++++ b/crates/supvan-app/src/device.rs
+@@ -14,6 +14,7 @@
+ 
+ use std::collections::HashMap;
+ use std::sync::{Arc, Mutex, OnceLock};
++use std::time::{Duration, Instant};
+ 
+ use supvan_proto::printer::Printer;
+ use tokio::sync::Mutex as AsyncMutex;
+@@ -25,8 +26,110 @@ use crate::printer_device::KsDevice;
+ /// calls so the status poller and print jobs reuse one RFCOMM socket per
+ /// printer. The outer `Mutex` guards the map (held briefly, sync); each printer
+ /// sits behind an async `Mutex` so a device op can be awaited while held.
+-fn bt_cache() -> &'static Mutex<HashMap<String, Arc<AsyncMutex<Printer>>>> {
+-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<AsyncMutex<Printer>>>>> = OnceLock::new();
++struct BtEntry {
++    printer: Arc<AsyncMutex<Printer>>,
++    last_activity: Instant,
++}
++
++pub fn bt_idle_timeout() -> Option<Duration> {
++    std::env::var("SUPVAN_BT_IDLE_TIMEOUT")
++        .ok()
++        .and_then(|s| s.parse::<u64>().ok())
++        .filter(|seconds| *seconds > 0)
++        .map(Duration::from_secs)
++}
++
++pub fn mark_print_completed(printer: &Arc<AsyncMutex<Printer>>) {
++    for entry in bt_cache().lock().unwrap().values_mut() {
++        if Arc::ptr_eq(&entry.printer, printer) {
++            entry.last_activity = Instant::now();
++        }
++    }
++}
++
++fn bt_connection_gate() -> &'static AsyncMutex<()> {
++    static GATE: OnceLock<AsyncMutex<()>> = OnceLock::new();
++    GATE.get_or_init(|| AsyncMutex::new(()))
++}
++
++fn disconnect_bluez(addr: &str) {
++    use dbus::blocking::stdintf::org_freedesktop_dbus::ObjectManager;
++    let result = (|| -> Result<(), dbus::Error> {
++        let connection = dbus::blocking::Connection::new_system()?;
++        let timeout = Duration::from_secs(5);
++        let objects = connection
++            .with_proxy("org.bluez", "/", timeout)
++            .get_managed_objects()?;
++        for (path, interfaces) in objects {
++            if interfaces
++                .get("org.bluez.Device1")
++                .and_then(|props| props.get("Address"))
++                .and_then(|value| value.0.as_str())
++                == Some(addr)
++            {
++                return connection
++                    .with_proxy("org.bluez", path, timeout)
++                    .method_call("org.bluez.Device1", "Disconnect", ());
++            }
++        }
++        Ok(())
++    })();
++    if let Err(error) = result {
++        log::warn!("Bluetooth disconnect for {addr}: {error}");
++    }
++}
++
++pub async fn reap_idle_connections() {
++    loop {
++        tokio::time::sleep(Duration::from_secs(1)).await;
++        if let Some(timeout) = bt_idle_timeout() {
++            let _gate = bt_connection_gate().lock().await;
++            let expired = {
++                let mut cache = bt_cache().lock().unwrap();
++                let expired: Vec<String> = cache
++                    .iter()
++                    .filter(|(_, entry)| {
++                        Arc::strong_count(&entry.printer) == 1
++                            && entry.last_activity.elapsed() >= timeout
++                    })
++                    .map(|(addr, _)| addr.clone())
++                    .collect();
++                for addr in &expired {
++                    cache.remove(addr);
++                }
++                expired
++            };
++            for addr in expired {
++                log::info!("Bluetooth idle timeout: disconnecting {addr}");
++                let _ = tokio::task::spawn_blocking(move || disconnect_bluez(&addr)).await;
++            }
++        }
++    }
++}
++
++pub fn idle_bluetooth_poll(uri: &str) -> bool {
++    if bt_idle_timeout().is_none() {
++        return false;
++    }
++    let Some(slug) = uri.strip_prefix("supvan://") else {
++        return false;
++    };
++    let entry = supvan_map().lock().unwrap().get(slug).cloned();
++    let Some(entry) = entry else {
++        return false;
++    };
++    if entry
++        .hidraw_path
++        .as_ref()
++        .is_some_and(|path| std::path::Path::new(path).exists())
++    {
++        return false;
++    }
++    entry.bt_address.is_some()
++}
++
++fn bt_cache() -> &'static Mutex<HashMap<String, BtEntry>> {
++    static CACHE: OnceLock<Mutex<HashMap<String, BtEntry>>> = OnceLock::new();
+     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+ }
+ 
+@@ -44,14 +147,23 @@ fn dial_bt(addr: &str) -> Option<Printer> {
+ /// Open `btrfcomm://host/path/AA:BB:CC:DD:EE:FF`, reusing a cached RFCOMM
+ /// socket when one is available. Drops the cache entry and reconnects if the
+ /// existing socket no longer responds.
+-pub async fn open_bt(uri: &str) -> Option<Box<KsDevice>> {
++async fn open_bt(uri: &str, activity: bool) -> Option<Box<KsDevice>> {
++    let _gate = bt_connection_gate().lock().await;
+     let addr = uri
+         .strip_prefix("btrfcomm://")
+         .and_then(|rest| rest.find('/').map(|pos| &rest[pos + 1..]))?;
+ 
+     // `await` can't appear in a match guard, so validate the cached socket
+     // before deciding whether to reuse it.
+-    let cached = bt_cache().lock().unwrap().get(addr).cloned();
++    let cached = {
++        let mut cache = bt_cache().lock().unwrap();
++        cache.get_mut(addr).map(|entry| {
++            if activity {
++                entry.last_activity = Instant::now();
++            }
++            entry.printer.clone()
++        })
++    };
+     let printer = match cached {
+         Some(arc) => {
+             if arc.lock().await.check_device().await.unwrap_or(false) {
+@@ -60,6 +172,7 @@ pub async fn open_bt(uri: &str) -> Option<Box<KsDevice>> {
+             } else {
+                 log::info!("device::open_bt: cached socket for {addr} is dead, reconnecting");
+                 bt_cache().lock().unwrap().remove(addr);
++                drop(arc);
+                 dial_and_cache(addr)?
+             }
+         }
+@@ -76,10 +189,13 @@ pub async fn open_bt(uri: &str) -> Option<Box<KsDevice>> {
+ /// cache, returning the shared handle.
+ fn dial_and_cache(addr: &str) -> Option<Arc<AsyncMutex<Printer>>> {
+     let arced = Arc::new(AsyncMutex::new(dial_bt(addr)?));
+-    bt_cache()
+-        .lock()
+-        .unwrap()
+-        .insert(addr.to_string(), arced.clone());
++    bt_cache().lock().unwrap().insert(
++        addr.to_string(),
++        BtEntry {
++            printer: arced.clone(),
++            last_activity: Instant::now(),
++        },
++    );
+     Some(arced)
+ }
+ 
+@@ -145,6 +261,18 @@ pub fn register_supvan(
+ /// cached BT socket. Returns `None` if neither transport is registered or
+ /// both fail to open.
+ pub async fn open_supvan(uri: &str) -> Option<KsDevice> {
++    open_supvan_internal(uri, true).await
++}
++
++pub async fn open_uri_for_poll(uri: &str) -> Option<KsDevice> {
++    if uri.starts_with("supvan://") {
++        open_supvan_internal(uri, false).await
++    } else {
++        open_uri(uri).await
++    }
++}
++
++async fn open_supvan_internal(uri: &str, activity: bool) -> Option<KsDevice> {
+     let slug = uri.strip_prefix("supvan://")?;
+     let entry = supvan_map().lock().unwrap().get(slug).cloned()?;
+ 
+@@ -157,7 +285,7 @@ pub async fn open_supvan(uri: &str) -> Option<KsDevice> {
+     if let Some(addr) = entry.bt_address.as_deref() {
+         // open_bt expects a full URI; synthesize one.
+         let uri = format!("btrfcomm://bt/{addr}");
+-        if let Some(dev) = open_bt(&uri).await {
++        if let Some(dev) = open_bt(&uri, activity).await {
+             return Some(*dev);
+         }
+         log::warn!("open_supvan: BT open failed for {slug} ({addr}), trying BLE");
+diff --git a/crates/supvan-app/src/ipp_job.rs b/crates/supvan-app/src/ipp_job.rs
+index 01fc7a8..e896efe 100644
+--- a/crates/supvan-app/src/ipp_job.rs
++++ b/crates/supvan-app/src/ipp_job.rs
+@@ -159,19 +159,26 @@ pub async fn run_jpeg_job(
+         .map_err(|e| JobFailure::other(format!("jpeg decode: {e}")))?
+         .to_luma8();
+ 
+-    let (canvas, label_w, label_h) = fit_luma(&img, media_size_hmm, printhead_width_dots);
+-    if label_w == 0 || label_h == 0 {
+-        return Err(JobFailure::other(format!(
+-            "jpeg: empty label geometry from media_size {media_size_hmm:?}"
+-        )));
+-    }
+-
+     let dev = crate::device::open_uri(device_uri).await.ok_or_else(|| {
+         JobFailure::new(
+             ipp_printer_app::PrinterReason::OFFLINE,
+             format!("cannot open device {device_uri}"),
+         )
+     })?;
++    // Sleeping Bluetooth connections do not refresh media in background polls.
++    let media_size_hmm = match dev.material().await {
++        Some(mat) if mat.width_mm > 0 && mat.height_mm > 0 => [
++            i32::from(mat.width_mm) * 100,
++            i32::from(mat.height_mm) * 100,
++        ],
++        _ => media_size_hmm,
++    };
++    let (canvas, label_w, label_h) = fit_luma(&img, media_size_hmm, printhead_width_dots);
++    if label_w == 0 || label_h == 0 {
++        return Err(JobFailure::other(format!(
++            "jpeg: empty label geometry from media_size {media_size_hmm:?}"
++        )));
++    }
+     // The throwaway record only feeds KsJob's darkness + printhead width; the
+     // driver name is irrelevant on this path.
+     let record = job_record(printer_name, device_uri, "", printhead_width_dots, darkness);
+diff --git a/crates/supvan-app/src/ipp_server.rs b/crates/supvan-app/src/ipp_server.rs
+index b479fa3..44fe22d 100644
+--- a/crates/supvan-app/src/ipp_server.rs
++++ b/crates/supvan-app/src/ipp_server.rs
+@@ -168,7 +168,12 @@ impl DeviceBackend for SupvanDeviceBackend {
+     }
+ 
+     async fn poll_status(&self, config: &PrinterConfig) -> Option<PollStatus> {
+-        let dev = crate::device::open_uri(&config.device_uri).await;
++        // Sleeping Bluetooth printers are checked when a job opens the device.
++        // Periodic status polling must not reconnect them or extend the idle timer.
++        if crate::device::idle_bluetooth_poll(&config.device_uri) {
++            return Some(PollStatus::default());
++        }
++        let dev = crate::device::open_uri_for_poll(&config.device_uri).await;
+         let Some(dev) = dev else {
+             // Device unreachable (powered off / unplugged / BT down). Report
+             // OFFLINE so the framework marks us printer-state=stopped and CUPS
+diff --git a/crates/supvan-app/src/main.rs b/crates/supvan-app/src/main.rs
+index 63e611b..11f8ad5 100644
+--- a/crates/supvan-app/src/main.rs
++++ b/crates/supvan-app/src/main.rs
+@@ -23,6 +23,8 @@ use std::env;
+ async fn main() {
+     let _ = env_logger::try_init();
+ 
++    tokio::spawn(device::reap_idle_connections());
++
+     let host = env::var("SUPVAN_HOST").unwrap_or_else(|_| "0.0.0.0".into());
+     let port: u16 = env::var("SUPVAN_PORT")
+         .ok()
+diff --git a/crates/supvan-app/src/printer_device.rs b/crates/supvan-app/src/printer_device.rs
+index b504ee1..30c1148 100644
+--- a/crates/supvan-app/src/printer_device.rs
++++ b/crates/supvan-app/src/printer_device.rs
+@@ -53,7 +53,11 @@ impl PrinterHandle {
+     pub async fn print_compressed(&self, blocks: &[Vec<u8>], speed: u16) -> ProtoResult<()> {
+         match self {
+             Self::Owned(p) => p.print_compressed(blocks, speed).await,
+-            Self::Shared(arc) => arc.lock().await.print_compressed(blocks, speed).await,
++            Self::Shared(arc) => {
++                let result = arc.lock().await.print_compressed(blocks, speed).await;
++                crate::device::mark_print_completed(arc);
++                result
++            }
+         }
+     }
+ 

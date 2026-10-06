@@ -61,3 +61,22 @@ ipp://HOST:PORT/ipp/print/PRINTER_NAME
 | 库存 | `9702` + 六位补零的库存 ID |
 
 小标签适用 ID 范围为 1–999999。请避免将这两个前缀用于其他自定义条码。
+
+## 蓝牙空闲自动断开
+
+使用本仓库的驱动补丁后，可在打印服务的环境变量中配置空闲超时：
+
+```ini
+Environment=SUPVAN_BT_IDLE_TIMEOUT=60
+```
+
+单位为秒。设为 `60` 时，空闲连接约一分钟后释放，下次打印自动重连；设为 `0` 或不设置则保持原有连接行为。状态轮询不会主动唤醒已断开的蓝牙连接，正在使用的连接不会被超时关闭。
+
+该参数属于打印服务，配置后需要重启服务。编译驱动前，在固定版本的 `supvan-cups` 源码目录应用补丁：
+
+```sh
+git checkout 9fd7af09580c3e710202e5471e77e0b88db0e3bb
+git apply /path/to/inventree-t50pro/deploy/supvan-bt-idle.patch
+```
+
+蓝牙休眠期间状态不会实时刷新；提交打印任务时才尝试连接。若手机 App 正占用打印机，需先断开 App。

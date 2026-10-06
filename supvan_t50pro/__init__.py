@@ -1,6 +1,5 @@
 """Print 40 x 30 mm InvenTree labels through the Supvan IPP service."""
 import io
-import json
 from rest_framework import serializers
 from plugin import InvenTreePlugin
 from plugin.mixins import BarcodeMixin, LabelPrintingMixin, SettingsMixin
@@ -9,12 +8,12 @@ from .ipp_client import exchange
 
 
 class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenTreePlugin):
-    NAME = 'Supvan T50 Pro'
+    NAME = 'Supvan T50 Pro Debian'
     SLUG = 'supvan-t50pro'
-    TITLE = '硕方 T50 Pro（30×15 / 40×30 mm）'
+    TITLE = '硕方 T50 Pro · Debian'
     DESCRIPTION = '通过内网 IPP 服务打印标签，并识别小标签数字条码'
     AUTHOR = 'Local'
-    VERSION = '0.4.0'
+    VERSION = '0.4.1'
     BLOCKING_PRINT = True
     SETTINGS = {
         'PRINTER_URI': {
@@ -22,43 +21,20 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
             'description': '默认打印服务的完整 IPP 地址',
             'default': 'ipp://100.68.102.138:8631/ipp/print/supvan_t50s_t0145b2409045195',
         },
-        'PRINTERS': {
-            'name': '可选打印机',
-            'description': 'JSON 对象，名称对应 IPP 地址；留空时使用默认地址',
-            'default': '{}',
-        },
     }
 
     class PrintingOptionsSerializer(serializers.Serializer):
         def validate(self, attrs):
-            self.context['printer_plugin'].check_ready(attrs.get('printer'))
+            self.context['printer_plugin'].check_ready()
             return attrs
 
     def get_printing_options_serializer(self, request, *args, **kwargs):
         context = dict(kwargs.pop('context', {}) or {})
         context['printer_plugin'] = self
-        serializer = self.PrintingOptionsSerializer(*args, context=context, **kwargs)
-        printers = self.get_printers()
-        if printers:
-            serializer.fields['printer'] = serializers.ChoiceField(
-                choices=list(printers), default=next(iter(printers)), label='打印机'
-            )
-        return serializer
+        return self.PrintingOptionsSerializer(*args, context=context, **kwargs)
 
-    def get_printers(self):
-        printers = json.loads(self.get_setting('PRINTERS') or '{}')
-        if not isinstance(printers, dict) or any(
-            not isinstance(name, str) or not isinstance(uri, str) or not uri.startswith('ipp://')
-            for name, uri in printers.items()
-        ):
-            raise serializers.ValidationError('可选打印机必须是名称对应 IPP 地址的 JSON 对象。')
-        return printers
-
-    def check_ready(self, printer=None):
-        printers = self.get_printers()
-        if printer is not None and printer not in printers:
-            raise serializers.ValidationError('所选打印机已不存在，请重新选择。')
-        uri = printers[printer] if printer is not None else self.get_setting('PRINTER_URI')
+    def check_ready(self):
+        uri = self.get_setting('PRINTER_URI')
         if not uri:
             raise serializers.ValidationError('尚未配置打印机 IPP 地址。')
         try:
@@ -80,7 +56,7 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
                      if abs(width - size[0]) <= 0.1 and abs(height - size[1]) <= 0.1), None)
         if size is None:
             raise ValueError('请使用 30×15 mm 或 40×30 mm 的标签模板。')
-        uri = self.check_ready((kwargs.get('printing_options') or {}).get('printer'))
+        uri = self.check_ready()
         image = kwargs.get('png_file')
         if image is None:
             raise RuntimeError('标签图片生成失败。')
@@ -103,3 +79,16 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
         except model.DoesNotExist:
             return None
         return {model.barcode_model_type(): instance.format_matched_response(user=user, **kwargs)}
+
+
+class SupvanVMLabelPrinter(SupvanLabelPrinter):
+    NAME = 'Supvan T50 Pro lh-pc-vm'
+    SLUG = 'supvan-t50pro-vm'
+    TITLE = '硕方 T50 Pro · lh-pc-vm'
+    SETTINGS = {
+        'PRINTER_URI': {
+            'name': '打印机 IPP 地址',
+            'description': '打印服务的完整 IPP 地址',
+            'default': '',
+        },
+    }

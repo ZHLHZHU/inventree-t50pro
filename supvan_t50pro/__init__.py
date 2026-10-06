@@ -13,7 +13,7 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
     TITLE = '硕方 T50 Pro · Debian'
     DESCRIPTION = '通过内网 IPP 服务打印标签，并识别小标签数字条码'
     AUTHOR = 'Local'
-    VERSION = '0.4.2'
+    VERSION = '0.4.3'
     BLOCKING_PRINT = True
     SETTINGS = {
         'PRINTER_URI': {
@@ -81,10 +81,10 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
         return {model.barcode_model_type(): instance.format_matched_response(user=user, **kwargs)}
 
 
-class SupvanVMLabelPrinter(SupvanLabelPrinter):
-    NAME = 'Supvan T50 Pro lh-pc-vm'
-    SLUG = 'supvan-t50pro-vm'
-    TITLE = '硕方 T50 Pro · lh-pc-vm'
+class SupvanRaspberryLabelPrinter(SupvanLabelPrinter):
+    NAME = 'Supvan T50 Pro raspberrypi'
+    SLUG = 'supvan-t50pro-raspberrypi'
+    TITLE = '硕方 T50 Pro · raspberrypi'
     SETTINGS = {
         'PRINTER_URI': {
             'name': '打印机 IPP 地址',
@@ -92,9 +92,3 @@ class SupvanVMLabelPrinter(SupvanLabelPrinter):
             'default': '',
         },
     }
-
-
-class SupvanRaspberryLabelPrinter(SupvanVMLabelPrinter):
-    NAME = 'Supvan T50 Pro raspberrypi'
-    SLUG = 'supvan-t50pro-raspberrypi'
-    TITLE = '硕方 T50 Pro · raspberrypi'

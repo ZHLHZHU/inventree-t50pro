@@ -15,7 +15,8 @@
    └── plugins/
        └── supvan_t50pro/
            ├── __init__.py
-           └── ipp_client.py
+           ├── ipp_client.py
+           └── configuration.py
    ```
 
 2. 重启 InvenTree Web 服务和后台 worker，确保两者都能读取插件文件。
@@ -26,7 +27,38 @@
 ipp://HOST:PORT/ipp/print/PRINTER_NAME
 ```
 
-完整地址以 `supvan-cups` 公布的地址为准。请替换插件自带的默认地址，不要直接沿用其他部署的地址。
+完整地址以 `supvan-cups` 公布的地址为准。插件不提供默认打印地址。
+
+## 配置多个独立打印入口
+
+将 [示例配置](supvan_t50pro/printers.example.json) 复制为插件目录中的 `printers.json`，填写各打印入口的名称和 IPP 地址：
+
+```json
+[
+  {
+    "id": "supvan-t50pro-workbench",
+    "name": "硕方 T50 Pro · 工作台",
+    "uri": "ipp://printer-host.local:8631/ipp/print/PRINTER_NAME"
+  },
+  {
+    "id": "supvan-t50pro-storage",
+    "name": "硕方 T50 Pro · 储物间",
+    "uri": "ipp://another-printer-host.local:8631/ipp/print/PRINTER_NAME"
+  }
+]
+```
+
+每条配置生成一个独立打印插件入口。重启 Web 服务和 worker 后，在插件管理中分别启用它们，打印时直接选择对应名称。
+
+- `id` 是唯一且稳定的插件标识，只能使用小写字母、数字和连字符。改名称或地址时保持 ID 不变。
+- `name` 是打印窗口显示的名称，不得重复。
+- `uri` 是该入口使用的完整 IPP 地址；配置文件的地址优先于插件设置中保留的地址。
+
+没有配置文件时，只生成通用的 `supvan-t50pro` 入口，地址通过插件设置填写。配置文件存在时，只生成文件中列出的入口。移除配置后，可在插件管理中关闭对应的旧入口。
+
+也可以用环境变量 `SUPVAN_PRINTER_CONFIG` 指定配置文件的绝对路径。Web 服务和 worker 必须读取同一份配置，修改后都要重启。配置错误会阻止插件加载，请检查服务日志。
+
+`printers.json` 已被 Git 忽略，部署地址留在各自的配置文件中。
 
 ## 添加标签模板
 
@@ -45,7 +77,7 @@ ipp://HOST:PORT/ipp/print/PRINTER_NAME
 
 1. 在 InvenTree 中选择物料或库存记录，打开标签打印。
 2. 选择与实际标签纸尺寸一致的模板。
-3. 选择“硕方 T50 Pro（30×15 / 40×30 mm）”插件，提交打印。
+3. 选择对应的硕方 T50 Pro 打印入口，提交打印。
 
 30×15 mm 模板只显示条形码和一行名称，不显示编号文字；名称过长会被裁切。
 
@@ -78,3 +110,8 @@ git apply /path/to/inventree-t50pro/deploy/supvan-bt-idle.patch
 ```
 
 蓝牙休眠期间状态不会实时刷新；提交打印任务时才尝试连接。若手机 App 正占用打印机，需先断开 App。
+
+
+## 打印服务配置示例
+
+`deploy/supvan-t50pro.service` 是服务模板。使用前需创建 `supvan` 服务用户、授予打印设备访问权限，并将 [环境变量示例](deploy/supvan-t50pro.env.example) 复制为 `/etc/supvan-t50pro.env`，填写 InvenTree 能访问的监听地址和端口。示例中的 `127.0.0.1` 仅供本机访问，跨机器使用时需修改。

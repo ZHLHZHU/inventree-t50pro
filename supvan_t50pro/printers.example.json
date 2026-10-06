@@ -1,0 +1,12 @@
+[
+  {
+    "id": "supvan-t50pro-workbench",
+    "name": "硕方 T50 Pro · 工作台",
+    "uri": "ipp://printer-host.local:8631/ipp/print/PRINTER_NAME"
+  },
+  {
+    "id": "supvan-t50pro-storage",
+    "name": "硕方 T50 Pro · 储物间",
+    "uri": "ipp://another-printer-host.local:8631/ipp/print/PRINTER_NAME"
+  }
+]

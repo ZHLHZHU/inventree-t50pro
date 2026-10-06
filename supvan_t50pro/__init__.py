@@ -1,25 +1,26 @@
-"""Print 40 x 30 mm InvenTree labels through the Supvan IPP service."""
+"""Configurable T50 Pro label printers for InvenTree."""
 import io
 from rest_framework import serializers
 from plugin import InvenTreePlugin
 from plugin.mixins import BarcodeMixin, LabelPrintingMixin, SettingsMixin
 import re
 from .ipp_client import exchange
+from .configuration import load_printers
 
 
 class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenTreePlugin):
-    NAME = 'Supvan T50 Pro Debian'
+    NAME = ''
     SLUG = 'supvan-t50pro'
-    TITLE = '硕方 T50 Pro · Debian'
+    TITLE = '硕方 T50 Pro'
     DESCRIPTION = '通过内网 IPP 服务打印标签，并识别小标签数字条码'
     AUTHOR = 'Local'
-    VERSION = '0.4.3'
+    VERSION = '0.5.0'
     BLOCKING_PRINT = True
     SETTINGS = {
         'PRINTER_URI': {
             'name': '打印机 IPP 地址',
             'description': '默认打印服务的完整 IPP 地址',
-            'default': 'ipp://100.68.102.138:8631/ipp/print/supvan_t50s_t0145b2409045195',
+            'default': '',
         },
     }
 
@@ -34,13 +35,15 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
         return self.PrintingOptionsSerializer(*args, context=context, **kwargs)
 
     def check_ready(self):
-        uri = self.get_setting('PRINTER_URI')
+        return self._check_uri(getattr(self, '_configured_uri', '') or self.get_setting('PRINTER_URI'))
+
+    def _check_uri(self, uri):
         if not uri:
             raise serializers.ValidationError('尚未配置打印机 IPP 地址。')
         try:
             state = exchange(uri, 0x000b)
         except Exception as exc:
-            raise serializers.ValidationError('无法连接所选打印服务，请检查服务和 Tailscale 网络。') from exc
+            raise serializers.ValidationError('无法连接所选打印服务，请检查打印服务和网络。') from exc
         if state.get('printer-state') == [5]:
             raise serializers.ValidationError('T50 Pro 未就绪，请确认打印机开机、手机 App 已断开，等待蓝牙重连后再试。')
         return uri
@@ -81,14 +84,23 @@ class SupvanLabelPrinter(BarcodeMixin, LabelPrintingMixin, SettingsMixin, InvenT
         return {model.barcode_model_type(): instance.format_matched_response(user=user, **kwargs)}
 
 
-class SupvanRaspberryLabelPrinter(SupvanLabelPrinter):
-    NAME = 'Supvan T50 Pro raspberrypi'
-    SLUG = 'supvan-t50pro-raspberrypi'
-    TITLE = '硕方 T50 Pro · raspberrypi'
-    SETTINGS = {
-        'PRINTER_URI': {
-            'name': '打印机 IPP 地址',
-            'description': '打印服务的完整 IPP 地址',
-            'default': '',
+# InvenTree discovers each generated class as a separate printer plugin.
+for _index, _printer in enumerate(load_printers()):
+    globals()[f'ConfiguredT50Pro{_index}'] = type(
+        f'ConfiguredT50Pro{_index}',
+        (SupvanLabelPrinter,),
+        {
+            '__module__': __name__,
+            'NAME': _printer['name'],
+            'TITLE': _printer['name'],
+            'SLUG': _printer['id'],
+            'SETTINGS': {
+                'PRINTER_URI': {
+                    'name': '打印机 IPP 地址',
+                    'description': '由打印机配置文件提供的 IPP 地址',
+                    'default': _printer['uri'],
+                },
+            },
+            '_configured_uri': _printer['uri'],
         },
-    }
+    )

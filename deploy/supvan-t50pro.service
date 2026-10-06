@@ -4,10 +4,10 @@ After=network-online.target tailscaled.service bluetooth.service
 Wants=network-online.target bluetooth.service
 [Service]
 Type=simple
-User=lh
+User=supvan
 Group=plugdev
 ExecStart=/opt/supvan/bin/supvan-printer-app
-Environment=SUPVAN_HOST=100.68.102.138
+EnvironmentFile=/etc/supvan-t50pro.env
 Environment=SUPVAN_PORT=8631
 Environment=RUST_LOG=info
 Environment=SUPVAN_BT_IDLE_TIMEOUT=60

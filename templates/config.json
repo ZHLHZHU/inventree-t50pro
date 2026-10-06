@@ -1,0 +1,20 @@
+[
+  {
+    "name": "硕方 40×30 · 物料",
+    "description": "40×30 mm 无黑标标签纸；左侧二维码，右侧物料名称和编号",
+    "width": 40,
+    "height": 30,
+    "model_type": "part",
+    "enabled": true,
+    "template": "part.html"
+  },
+  {
+    "name": "硕方 40×30 · 库存",
+    "description": "40×30 mm 无黑标标签纸；左侧二维码，右侧物料名称和编号",
+    "width": 40,
+    "height": 30,
+    "model_type": "stockitem",
+    "enabled": true,
+    "template": "stock.html"
+  }
+]

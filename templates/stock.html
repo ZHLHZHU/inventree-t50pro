@@ -1,0 +1,12 @@
+{% extends "label/label_base.html" %}
+{% load barcode %}
+{% block style %}
+.qr { position:absolute; left:0.5mm; top:4mm; width:22mm; height:22mm; }
+.text { position:absolute; left:23mm; top:3mm; width:16mm; font-family:Arial,"Noto Sans CJK SC",sans-serif; font-size:8pt; line-height:1.15; overflow-wrap:anywhere; max-height:17mm; overflow:hidden; }
+.code { position:absolute; left:23mm; top:24mm; width:16mm; font-family:Arial,sans-serif; font-size:7pt; white-space:nowrap; overflow:hidden; }
+{% endblock style %}
+{% block content %}
+<img class="qr" src="{% qrcode qr_data %}">
+<div class="text">{{ part.full_name }}</div>
+<div class="code">S#{{ stock_item.pk }}</div>
+{% endblock content %}

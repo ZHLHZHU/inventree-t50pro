@@ -1,0 +1,1 @@
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1820", ATTRS{idProduct}=="2076", GROUP="plugdev", MODE="0660", SYMLINK+="supvan-t50pro"

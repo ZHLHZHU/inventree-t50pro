@@ -1,0 +1,13 @@
+FROM rust:1-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libdbus-1-dev
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY data ./data
+RUN cargo build --locked --release -p supvan-cli -p supvan-app
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libdbus-1-3 ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /build/target/release/supvan-cli /usr/local/bin/
+COPY --from=build /build/target/release/supvan-printer-app /usr/local/bin/
+ENV RUST_LOG=info
+CMD ["supvan-printer-app"]

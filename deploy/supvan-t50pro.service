@@ -1,0 +1,18 @@
+[Unit]
+Description=Supvan T50 Pro IPP printer service
+After=network-online.target tailscaled.service bluetooth.service
+Wants=network-online.target bluetooth.service
+[Service]
+Type=simple
+User=lh
+Group=plugdev
+ExecStart=/opt/supvan/bin/supvan-printer-app
+Environment=SUPVAN_HOST=100.68.102.138
+Environment=SUPVAN_PORT=8631
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target

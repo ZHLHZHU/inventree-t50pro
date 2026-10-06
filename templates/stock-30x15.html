@@ -1,0 +1,16 @@
+{% extends "label/label_base.html" %}
+{% load barcode %}
+{% block style %}
+.barcode { position:absolute; left:1.25mm; top:1mm; width:27.5mm; height:9mm; }
+.name { position:absolute; left:1mm; top:11mm; width:28mm; height:3mm; font-family:Arial,"Noto Sans CJK SC",sans-serif; font-size:8pt; line-height:1; text-align:center; white-space:nowrap; overflow:hidden; }
+{% endblock style %}
+{% block content %}
+{% with number=stock_item.pk|stringformat:"06d" %}
+{% with prefixed="X9702"|add:number %}
+{% with payload=prefixed|slice:"1:" %}
+<img class="barcode" src="{% barcode payload barcode_class='code128' write_text=False module_width=0.25 module_height=9 quiet_zone=2.5 dpi=812.8 margin_top=0 margin_bottom=0 %}">
+{% endwith %}
+{% endwith %}
+{% endwith %}
+<div class="name">{{ part.name }}</div>
+{% endblock content %}

@@ -16,5 +16,23 @@
     "model_type": "stockitem",
     "enabled": true,
     "template": "stock.html"
+  },
+  {
+    "name": "硕方 30×15 · 条码 · 物料",
+    "description": "上方 Code 128，下方简短名称，不显示编号；条码前缀9701加六位对象 ID",
+    "width": 30,
+    "height": 15,
+    "model_type": "part",
+    "enabled": true,
+    "template": "part-30x15.html"
+  },
+  {
+    "name": "硕方 30×15 · 条码 · 库存",
+    "description": "上方 Code 128，下方简短名称，不显示编号；条码前缀9702加六位对象 ID",
+    "width": 30,
+    "height": 15,
+    "model_type": "stockitem",
+    "enabled": true,
+    "template": "stock-30x15.html"
   }
 ]
